@@ -1,0 +1,33 @@
+# ============================
+# binary_sensor.yaml
+# ============================
+
+- platform: template
+  sensors:
+
+    hc1_cooling_filtered:
+      unique_id: hc1_cooling_filtered
+      friendly_name: "HC1 Kühlen (gefiltert)"
+      device_class: cold
+      value_template: >-
+        {# Roh-Signal aus EMS-ESP #}
+        {% set cooling_raw = is_state('binary_sensor.thermostat_hc1_cooling_on', 'on') %}
+
+        {# Zusatzbedingungen, wann Kühlen überhaupt plausibel wäre #}
+        {% set t_out    = states('sensor.gw2000a_wifid3a3_aussen_temperatur') | float(0) %}
+        {% set room_set = states('number.thermostat_hc1_selected_room_temperature') | float(0) %}
+        {% set hvac     = states('climate.thermostat_hc1') %}
+
+        {# Beispiel: Kühlen nur zulassen, wenn draußen > 15°C UND Modus tatsächlich "cool/auto" #}
+        {% set cooling_plausible = (t_out > 15) and (hvac in ['cool', 'auto']) %}
+
+        {{ cooling_raw and cooling_plausible }}
+      attribute_templates:
+        cooling_raw: "{{ is_state('binary_sensor.thermostat_hc1_cooling_on', 'on') }}"
+        t_outdoor: "{{ states('sensor.gw2000a_wifid3a3_aussen_temperatur') }}"
+        room_set: "{{ states('number.thermostat_hc1_selected_room_temperature') }}"
+        hvac_mode: "{{ states('climate.thermostat_hc1') }}"
+        cooling_plausible: >-
+          {% set t_out    = states('sensor.gw2000a_wifid3a3_aussen_temperatur') | float(0) %}
+          {% set hvac     = states('climate.thermostat_hc1') %}
+          {{ (t_out > 15) and (hvac in ['cool', 'auto']) }}

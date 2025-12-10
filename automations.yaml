@@ -1,0 +1,316 @@
+- id: hc1_autotune_gain
+  alias: HC1 Autotune – Gain
+  triggers:
+  - event: start
+    trigger: homeassistant
+  - minutes: "/10"
+    trigger: time_pattern
+  actions:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ (gain_target | float) != (gain_cur | float) }}'
+      sequence:
+      - target:
+          entity_id: input_number.hc1_offset_gain
+        data:
+          value: '{{ gain_target | float }}'
+        action: input_number.set_value
+  - data:
+      name: Autotune Gain
+      message: 'e_abs={{ e_abs | round(2) }} K • Gain: {{ gain_cur }} → {{ gain_target
+        }}'
+    action: logbook.log
+  mode: single
+  variables:
+    room_set: '{{ states(''number.thermostat_hc1_selected_room_temperature'') | float(21)
+      }}'
+    room_t: '{{ states(''sensor.thermostat_hc1_current_room_temperature'') | float(21)
+      }}'
+    e_abs: '{{ (room_set - room_t) | abs }}'
+    gain_cur: '{{ states(''input_number.hc1_offset_gain'') | float(1.0) }}'
+    gain_min: 0.6
+    gain_max: 3.5
+    step_big: 0.8
+    step_mid: 0.4
+    step_dn: 0.2
+    gain_target: '{% if e_abs >= 1.2 %} {{ [gain_cur + step_big, gain_max] | min }}
+      {% elif e_abs >= 0.7 %} {{ [gain_cur + step_mid, gain_max] | min }} {% elif
+      e_abs <= 0.3 %} {{ [gain_cur - step_dn, gain_min] | max }} {% else %} {{ gain_cur
+      }} {% endif %}'
+- id: hc1_offset_writer_weather
+  alias: HC1 Offset – wetterbasiert schreiben
+  mode: single
+  trigger:
+  - platform: state
+    entity_id: sensor.hc1_offset_wetterbasiert_3
+    for: 00:01:30
+  - platform: time_pattern
+    minutes: "/4"
+  variables:
+    calc: '{{ states(''sensor.hc1_offset_wetterbasiert_3'') | float(0) }}'
+    target_entity: number.thermostat_hc1_offset_temperature
+    current: '{{ states(target_entity) | float(0) }}'
+    offset_min: 0.5
+    offset_max: 6.5
+    hysteresis: 0.15
+    per_change_limit: 2.5
+  action:
+  - variables:
+      clamped_calc: '{% if calc < offset_min %} {{ offset_min }} {% elif calc > offset_max
+        %} {{ offset_max }} {% else %} {{ calc }} {% endif %}'
+      delta: '{{ clamped_calc - current }}'
+      delta_limited: '{% if   delta >  per_change_limit %} {{  per_change_limit }}
+        {% elif delta < -per_change_limit %} {{ -per_change_limit }} {% else %}                          {{  delta
+        }} {% endif %}'
+      new_raw: '{{ current + delta_limited }}'
+      new_half: '{{ ((new_raw * 2) | round(0) / 2) | float(0) }}'
+  - condition: template
+    value_template: '{{ (new_half - current) | abs > hysteresis }}'
+  - service: number.set_value
+    target:
+      entity_id: '{{ target_entity }}'
+    data:
+      value: '{{ new_half }}'
+  - service: logbook.log
+    data:
+      name: HC1 Offset (Wetter)
+      message: calc={{ calc }} → {{ current }} → {{ new_half }} K (Δ={{ (new_half-current)|round(2)
+        }})
+- id: flow_setpoint_writer_37cap
+  alias: Vorlauf-Soll schreiben – 37°C Cap
+  mode: single
+  trigger:
+  - platform: state
+    entity_id: sensor.vorlauf_soll_37c_cap
+    for: 00:01:00
+  - platform: time_pattern
+    minutes: "/3"
+  condition:
+  - condition: state
+    entity_id: binary_sensor.boiler_heating_active
+    state: 'on'
+  - condition: state
+    entity_id: binary_sensor.hc1_cooling_really_on
+    state: 'off'
+  - condition: state
+    entity_id: binary_sensor.hc1_heizfreigabe
+    state: 'on'
+  variables:
+    rec_entity: sensor.vorlauf_soll_37c_cap
+    target_entity: number.boiler_selected_flow_temperature
+    rec: '{{ states(rec_entity) | float(0) }}'
+    cur: '{{ states(target_entity) | float(0) }}'
+    min_safe: 30
+    max_safe: 37
+    hysteresis: 0.5
+    per_change_limit: 2.0
+  action:
+  - variables:
+      rec_clamped: '{% if rec < min_safe %} {{ min_safe }} {% elif rec > max_safe
+        %} {{ max_safe }} {% else %} {{ rec }} {% endif %}'
+      delta: '{{ (rec_clamped - cur) | float(0) }}'
+      delta_limited: '{% if delta >  per_change_limit %} {{  per_change_limit }} {%
+        elif delta < -per_change_limit %} {{ -per_change_limit }} {% else %}                          {{  delta
+        }} {% endif %}'
+      new_raw: '{{ cur + delta_limited }}'
+      new_half: '{{ ((new_raw * 2) | round(0) / 2) | float(0) }}'
+  - condition: template
+    value_template: '{{ (new_half - cur) | abs > hysteresis }}'
+  - service: number.set_value
+    target:
+      entity_id: '{{ target_entity }}'
+    data:
+      value: '{{ new_half }}'
+  - service: logbook.log
+    data:
+      name: Vorlauf-Soll Writer
+      message: 'Empfehlung={{ rec | round(1) }}°C (clamped={{ rec_clamped | round(1)
+        }}°C) • geschrieben: {{ cur | round(1) }}°C → {{ new_half | round(1) }}°C
+        • Δ={{ (new_half - cur) | round(2) }} K
+
+        '
+- id: watchdog_flow_setpoint
+  alias: Watchdog – Vorlauf-Soll gegen 0 sichern
+  mode: restart
+  trigger:
+  - platform: state
+    entity_id:
+    - number.boiler_selected_flow_temperature
+    - sensor.boiler_selected_flow_temperature
+    - binary_sensor.boiler_heating_active
+    - binary_sensor.hc1_cooling_really_on
+  - platform: time_pattern
+    minutes: "/5"
+  variables:
+    min_safe: 30
+    sp: '{{ states(''number.boiler_selected_flow_temperature'') | float(0) }}'
+    heating_on: '{{ is_state(''binary_sensor.boiler_heating_active'',''on'') }}'
+    cooling_on: '{{ is_state(''binary_sensor.hc1_cooling_really_on'',''on'') }}'
+    last_valid: '{{ states(''input_number.last_valid_flow_setpoint'') | float(min_safe)
+      }}'
+    invalid: '{% set raw = states(''number.boiler_selected_flow_temperature'') %}
+      {% set bad = (raw in [''unknown'',''unavailable'',''none'','''']) %} {% set
+      too_low = (sp < min_safe) and heating_on and (not cooling_on) %} {{ bad or (sp
+      <= 0) or too_low }}'
+  action:
+  - choose:
+    - conditions: '{{ not invalid and heating_on and not cooling_on }}'
+      sequence:
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.last_valid_flow_setpoint
+        data:
+          value: '{{ sp }}'
+    - conditions: '{{ invalid }}'
+      sequence:
+      - variables:
+          target_sp: '{{ [ last_valid, min_safe ] | max }}'
+      - service: number.set_value
+        target:
+          entity_id: number.boiler_selected_flow_temperature
+        data:
+          value: '{{ target_sp }}'
+      - service: logbook.log
+        data:
+          name: Watchdog Vorlauf
+          message: 'Ungültig: {{ sp }}°C → gesetzt auf {{ target_sp }}°C (min_safe={{
+            min_safe }}°C, last_valid={{ last_valid }}°C)'
+- id: store_last_valid_flow_setpoint
+  alias: Watchdog – letzten gültigen Vorlauf-Soll speichern
+  mode: single
+  trigger:
+  - platform: state
+    entity_id:
+    - number.boiler_selected_flow_temperature
+    - sensor.boiler_selected_flow_temperature
+  condition:
+  - condition: template
+    value_template: '{% set raw = trigger.to_state.state if trigger is defined and
+      trigger.to_state is defined else ''0'' %} {{ raw not in [''unknown'',''unavailable'',''none'','''']
+      and (raw | float(0) > 1) }}'
+  action:
+  - variables:
+      new_value: '{{ trigger.to_state.state | float(0) if trigger is defined and trigger.to_state
+        is defined else 0 }}'
+  - service: input_number.set_value
+    target:
+      entity_id: input_number.last_valid_flow_setpoint
+    data:
+      value: '{{ new_value }}'
+  - service: logbook.log
+    data:
+      name: Watchdog (Store)
+      message: 'Letzten gültigen Vorlauf-Soll gespeichert: {{ new_value }}°C'
+- id: pump_off_when_no_heating
+  alias: Pumpe AUS bei Heizpause (0%)
+  mode: single
+  trigger:
+  - platform: state
+    entity_id: binary_sensor.boiler_heating_active
+    to: 'off'
+  - platform: time_pattern
+    minutes: "/5"
+  condition:
+  - condition: state
+    entity_id: binary_sensor.boiler_heating_active
+    state: 'off'
+  variables:
+    pump_set_entity: number.boiler_boiler_pump_max_power
+    pump_cur: '{{ states(''sensor.boiler_circulation_pump_speed'') | float(0) }}'
+  action:
+  - condition: template
+    value_template: '{{ pump_cur > 0 }}'
+  - service: number.set_value
+    target:
+      entity_id: '{{ pump_set_entity }}'
+    data:
+      value: 0
+  - service: logbook.log
+    data:
+      name: Pumpe AUS
+      message: Heizen aus → Pumpe von {{ pump_cur|round(0) }}% auf 0% gestellt.
+- id: flow_setpoint_nudger_v1
+  alias: Vorlauf-Soll – sanfte Nachregelung (Raumfehler)
+  mode: single
+  trigger:
+  - platform: time_pattern
+    minutes: "/5"
+  - platform: state
+    entity_id:
+    - sensor.thermostat_hc1_current_room_temperature
+    - number.thermostat_hc1_selected_room_temperature
+    for: 00:05:00
+  variables:
+    sp_entity: number.boiler_selected_flow_temperature
+    t_out: '{{ states(''sensor.gw2000a_wifid3a3_aussen_temperatur'') | float(10) }}'
+    room_set: '{{ states(''number.thermostat_hc1_selected_room_temperature'') | float(21)
+      }}'
+    room_t: '{{ states(''sensor.thermostat_hc1_current_room_temperature'') | float(21)
+      }}'
+    e: '{{ (room_set - room_t) | float(0) }}'
+    sp_cur: '{{ states(sp_entity) | float(30) }}'
+    sp_dyn_max: 37
+    sp_min: 30
+    step_up: 1.5
+    step_down: 0.6
+    hysteresis_c: 0.25
+  condition:
+  - condition: state
+    entity_id: binary_sensor.boiler_heating_active
+    state: 'on'
+  - condition: state
+    entity_id: binary_sensor.hc1_cooling_really_on
+    state: 'off'
+  - condition: state
+    entity_id: binary_sensor.hc1_heizfreigabe
+    state: 'on'
+  action:
+  - variables:
+      sp_target_raw: '{% if e >= 0.9 %}        {{ sp_cur + step_up }} {% elif e >=
+        0.4 %}      {{ sp_cur + 1.0 }} {% elif e <= -0.4 %}     {{ sp_cur - step_down
+        }} {% else %}               {{ sp_cur }} {% endif %}'
+      sp_target_clamped: '{% set v = sp_target_raw | float %} {% if v < sp_min %}
+        {{ sp_min }} {% elif v > sp_dyn_max %} {{ sp_dyn_max }} {% else %} {{ v }}
+        {% endif %}'
+  - condition: template
+    value_template: '{{ (sp_target_clamped - sp_cur) | abs > hysteresis_c }}'
+  - service: number.set_value
+    target:
+      entity_id: '{{ sp_entity }}'
+    data:
+      value: '{{ sp_target_clamped }}'
+  - service: logbook.log
+    data:
+      name: Vorlauf-Nachregelung
+      message: 'e={{ e|round(2) }}K, T_out={{ t_out|round(1) }}°C → Vorlauf {{ sp_cur|round(1)
+        }}°C → {{ sp_target_clamped|round(1) }}°C (Cap 37°C)
+
+        '
+- id: hc1_heatmode_guard
+  alias: Heizmodus-Schutz – immer HEAT
+  mode: restart
+  trigger:
+  - platform: time_pattern
+    minutes: "/30"
+  - platform: state
+    entity_id: climate.thermostat_hc1
+  variables:
+    climate_entity: climate.thermostat_hc1
+    cooling_on: '{{ is_state(''binary_sensor.hc1_cooling_really_on'',''on'') }}'
+  condition: []
+  action:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ states(climate_entity) != ''heat'' or cooling_on }}'
+      sequence:
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: '{{ climate_entity }}'
+        data:
+          hvac_mode: heat
+      - service: logbook.log
+        data:
+          name: Heizmodus-Schutz
+          message: HVAC auf 'heat' gestellt (cool war aktiv oder Modus ≠ heat).

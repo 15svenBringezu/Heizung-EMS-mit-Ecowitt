@@ -1,0 +1,72 @@
+hc1_heat_mode:
+  alias: "HC1: Heat erzwingen"
+  sequence:
+    - service: climate.set_hvac_mode
+      target: { entity_id: climate.thermostat_hc1 }
+      data: { hvac_mode: heat }
+
+hc1_auto_mode:
+  alias: "HC1: Auto-Modus"
+  sequence:
+    - service: climate.set_hvac_mode
+      target: { entity_id: climate.thermostat_hc1 }
+      data: { hvac_mode: auto }
+
+hc1_offset_reset:
+  alias: "HC1: Offset auf 0 K"
+  sequence:
+    - service: number.set_value
+      target: { entity_id: number.thermostat_hc1_internal_temperature_offset }
+      data: { value: 0 }
+
+hc1_offset_up:
+  alias: "HC1: Offset +0.3 K"
+  mode: restart
+  sequence:
+    - variables:
+        step: 0.3
+        ent: number.thermostat_hc1_internal_temperature_offset
+        cur: "{{ states(ent) | float(0) }}"
+        new: "{{ (cur + step) | round(2) }}"
+    - service: number.set_value
+      target: { entity_id: "{{ ent }}" }
+      data: { value: "{{ new }}" }
+
+hc1_offset_down:
+  alias: "HC1: Offset −0.3 K"
+  mode: restart
+  sequence:
+    - variables:
+        step: 0.3
+        ent: number.thermostat_hc1_internal_temperature_offset
+        cur: "{{ states(ent) | float(0) }}"
+        new: "{{ (cur - step) | round(2) }}"
+    - service: number.set_value
+      target: { entity_id: "{{ ent }}" }
+      data: { value: "{{ new }}" }
+
+hc1_coolstart_up:
+  alias: "HC1: Cooling-Start +1 °C"
+  mode: restart
+  sequence:
+    - variables:
+        step: 1
+        ent: number.thermostat_hc1_cooling_starttemp
+        cur: "{{ states(ent) | float(25) }}"
+        new: "{{ (cur + step) | round(0) }}"
+    - service: number.set_value
+      target: { entity_id: "{{ ent }}" }
+      data: { value: "{{ new }}" }
+
+hc1_coolstart_down:
+  alias: "HC1: Cooling-Start −1 °C"
+  mode: restart
+  sequence:
+    - variables:
+        step: 1
+        ent: number.thermostat_hc1_cooling_starttemp
+        cur: "{{ states(ent) | float(25) }}"
+        new: "{{ (cur - step) | round(0) }}"
+    - service: number.set_value
+      target: { entity_id: "{{ ent }}" }
+      data: { value: "{{ new }}" }

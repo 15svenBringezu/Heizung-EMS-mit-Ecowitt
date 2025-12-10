@@ -1,0 +1,27 @@
+# Geheimnisse niemals ins Repo
+secrets.yaml
+.secrets.yaml
+
+# Home Assistant Daten, die nicht versioniert werden sollten
+home-assistant_v2.db
+home-assistant_v2.db-shm
+home-assistant_v2.db-wal
+home-assistant.log
+core.config_entries
+core.device_registry
+core.entity_registry
+core.restore_state
+core.area_registry
+
+# HA interne Ordner
+.storage/
+.cloud/
+deps/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Sonstiger Kram
+*.log
+*.db

@@ -1,0 +1,395 @@
+# ============== TEMPLATES (stabil & komplett) ==============
+
+- sensor:
+
+    # WP Wärmeleistung (aus Buderus / EMS-ESP)
+    - name: "WP Wärmeleistung"
+      unique_id: wp_waermeleistung
+      unit_of_measurement: "kW"
+      device_class: power
+      state_class: measurement
+      state: >-
+        {% set raw  = states('sensor.boiler_compressor_power_output')|float(none) %}
+        {% set unit = state_attr('sensor.boiler_compressor_power_output','unit_of_measurement') %}
+        {% if raw is not none %}
+          {{ (raw / 1000) | round(2) if unit == 'W' else raw | round(2) }}
+        {% else %}
+          unknown
+        {% endif %}
+
+    # WP Stromaufnahme (elektrische Leistung)
+    - name: "WP Stromaufnahme"
+      unique_id: wp_stromaufnahme
+      unit_of_measurement: "kW"
+      device_class: power
+      state_class: measurement
+      state: >-
+        {% set raw  = states('sensor.boiler_compressor_current_power')|float(none) %}
+        {% set unit = state_attr('sensor.boiler_compressor_current_power','unit_of_measurement') %}
+        {% if raw is not none %}
+          {{ (raw / 1000) | round(3) if unit == 'W' else raw | round(3) }}
+        {% else %}
+          unknown
+        {% endif %}
+
+    # COP aktuell = Wärmeleistung / elektrische Leistung
+    - name: "WP COP aktuell"
+      unique_id: wp_cop_aktuell
+      unit_of_measurement: "×"
+      icon: "mdi:alpha-c-circle"
+      state_class: measurement
+      availability: >-
+        {{ states('sensor.wp_warmeleistung')|float(none) is not none
+           and states('sensor.wp_stromaufnahme')|float(none) is not none
+           and states('sensor.wp_stromaufnahme')|float(0) > 0 }}
+      state: >-
+        {% set q = states('sensor.wp_warmeleistung')|float(0) %}
+        {% set p = states('sensor.wp_stromaufnahme')|float(0) %}
+        {{ (q / p) | round(2) if p > 0 else 0 }}
+
+    # 1) Autotune – Raumfehler (Soll - Ist) in K
+    - name: "Autotune Raumfehler"
+      unique_id: autotune_raumfehler
+      unit_of_measurement: "K"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{ states('number.thermostat_hc1_selected_room_temperature')|float(none) is not none
+           and states('sensor.thermostat_hc1_current_room_temperature')|float(none) is not none }}
+      state: >-
+        {% set s_soll = states('number.thermostat_hc1_selected_room_temperature')|float %}
+        {% set s_ist  = states('sensor.thermostat_hc1_current_room_temperature')|float %}
+        {{ (s_soll - s_ist) | round(3) }}
+
+    # 2) HC1 Vorlauf Δ K (robust)
+    - name: "HC1 Vorlauf Δ K (robust)"
+      unique_id: hc1_vorlauf_delta_k_robust
+      unit_of_measurement: "K"
+      state_class: measurement
+      state: >-
+        {{ (states('sensor.vorlauf_mit_wetter_geklemmt') | float(0)
+           - states('sensor.vorlauf_basis_ohne_wetter')   | float(0)) | round(2) }}
+      attributes:
+        mit_wetter_geklemmt: "{{ states('sensor.vorlauf_mit_wetter_geklemmt') }}"
+        basis_ohne_wetter:   "{{ states('sensor.vorlauf_basis_ohne_wetter') }}"
+
+    # 3) Vorlauf Δ (mit−ohne) [K]
+    - name: "Vorlauf Δ (mit−ohne) [K]"
+      unique_id: hc1_vorlauf_delta_k
+      unit_of_measurement: "K"
+      state_class: measurement
+      state: >-
+        {% set mit  = states('sensor.vorlauf_mit_wetter_geklemmt')|float(none) %}
+        {% set ohne = states('sensor.vorlauf_basis_ohne_wetter')|float(none) %}
+        {% if mit is not none and ohne is not none %}
+          {{ (mit - ohne) | round(2) }}
+        {% else %}
+          unknown
+        {% endif %}
+      attributes:
+        mit_wetter_geklemmt: "{{ states('sensor.vorlauf_mit_wetter_geklemmt') }}"
+        basis_ohne_wetter:   "{{ states('sensor.vorlauf_basis_ohne_wetter') }}"
+
+    # 4) Vorlauf Ist (safe)
+    - name: "Vorlauf Ist (safe)"
+      unique_id: vorlauf_ist_safe
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{ states('sensor.boiler_selected_flow_temperature')|float(none) is not none }}
+      state: >-
+        {{ states('sensor.boiler_selected_flow_temperature')|float|round(1) }}
+
+    # 4b) Rücklauf (safe) – mit Fallback-Kette
+    - name: "Rücklauf (safe)"
+      unique_id: ruecklauf_safe
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{
+          states('sensor.boiler_heat_carrier_return_tc0')|float(none) is not none
+          or states('sensor.boiler_return_temperature')|float(none) is not none
+          or states('sensor.ruecklauf')|float(none) is not none
+        }}
+      state: >-
+        {% set v1 = states('sensor.boiler_heat_carrier_return_tc0')|float(none) %}
+        {% set v2 = states('sensor.boiler_return_temperature')|float(none) %}
+        {% set v3 = states('sensor.ruecklauf')|float(none) %}
+        {% set val = v1 if v1 is not none else (v2 if v2 is not none else v3) %}
+        {{ val|round(1) if val is not none else 'unknown' }}
+
+    # 5) Vorlauf Soll (safe)
+    - name: "Vorlauf Soll (safe)"
+      unique_id: vorlauf_soll_safe
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{ states('number.boiler_selected_flow_temperature')|float(none) is not none }}
+      state: >-
+        {{ states('number.boiler_selected_flow_temperature')|float|round(1) }}
+
+    # Spreizung ΔVL–RL (Vorlauf - Rücklauf) in K
+    - name: "Spreizung ΔVL–RL"
+      unique_id: vl_rl_delta_k
+      unit_of_measurement: "K"
+      device_class: temperature
+      state_class: measurement
+      icon: "mdi:thermometer-chevron-up"
+      availability: >-
+        {{
+          states('sensor.vorlauf_ist_safe')|float(none) is not none
+          and states('sensor.ruecklauf_safe')|float(none) is not none
+        }}
+      state: >-
+        {% set vl = states('sensor.vorlauf_ist_safe')|float(none) %}
+        {% set rl = states('sensor.ruecklauf_safe')|float(none) %}
+        {% if vl is not none and rl is not none %}
+          {{ (vl - rl) | round(1) }}
+        {% else %}
+          unknown
+        {% endif %}
+
+    # 6) Autotune Gain – Spiegel (nur Anzeige)
+    - name: "Autotune Gain [×]"
+      unique_id: autotune_gain_sensor
+      unit_of_measurement: "×"
+      state_class: measurement
+      availability: >-
+        {{ states('input_number.hc1_offset_gain') not in ['unknown','unavailable','none',''] }}
+      state: >-
+        {{ states('input_number.hc1_offset_gain') }}
+
+    # 7) Forecast: niedrigste Temperatur der nächsten 36 h
+    - name: "Forecast Min Temp 36h"
+      unique_id: forecast_min_temp_36h
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{ state_attr('sensor.hiltpoltstein_wetterbericht','forecast') is iterable
+           or state_attr('sensor.hiltpoltstein_temperatur','data') is iterable
+           or states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(none) is not none }}
+      state: >-
+        {% set end  = now() + timedelta(hours=36) %}
+        {% set vals = [] %}
+        {% set fc   = state_attr('sensor.hiltpoltstein_wetterbericht','forecast') %}
+        {% if fc is iterable and (fc|count) > 0 %}
+          {% for p in fc %}
+            {% set d = (p.datetime if p is mapping and p.datetime is defined
+                        else p['datetime'] if p is mapping and 'datetime' in p else none) %}
+            {% set t = (p.temperature if p is mapping and p.temperature is defined
+                        else p['temperature'] if p is mapping and 'temperature' in p
+                        else p.temperature_low if p is mapping and p.temperature_low is defined
+                        else p['temperature_low'] if p is mapping and 'temperature_low' in p
+                        else none) %}
+            {% if d is not none and t is not none and as_datetime(d) <= end %}
+              {% set vals = vals + [ t|float ] %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {% if vals|count == 0 %}
+          {% set dl = state_attr('sensor.hiltpoltstein_temperatur','data') %}
+          {% if dl is iterable and (dl|count) > 0 %}
+            {% for p in dl[:36] %}
+              {% if p is mapping and ('value' in p) %}
+                {% set vals = vals + [ p['value']|float ] %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endif %}
+        {% set fallback = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {{ (vals|min)|round(1) if vals|count > 0 else fallback }}
+
+    # 8) Wetterbasierter Offset (0..5 K; 0.5er Raster)
+    - name: "HC1 Offset wetterbasiert 3"
+      unique_id: hc1_offset_wetterbasiert_3
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{ states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(none) is not none }}
+      state: >-
+        {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {% set sun   = states('sensor.gw2000a_wifid3a3_solarstrahlung')|float(0) %}
+        {% set wind  = states('sensor.gw2000a_wifid3a3_windgeschwindigkeit')|float(0) %}
+        {% set t_min = states('sensor.forecast_min_temp_36h')|float(t_out) %}
+        {% set drop_k = (t_out - t_min) %}
+        {% if drop_k < 0 %}{% set drop_k = 0 %}{% endif %}
+        {% set step_base = 1.0 %}
+        {% set step_max  = 2.0 %}
+        {% if   drop_k >= 8 %}  {% set step_weather = step_max %}
+        {% elif drop_k >= 5 %}  {% set step_weather = [step_base*1.5, step_max] | min %}
+        {% elif drop_k >= 3 %}  {% set step_weather = step_base %}
+        {% else %}              {% set step_weather = 0 %}
+        {% endif %}
+        {% set mod_sun  = (-0.3) if sun  > 400 else 0 %}
+        {% set mod_wind = ( 0.3) if (wind > 20 and t_out < 0) else 0 %}
+        {% set total = step_weather + mod_sun + mod_wind %}
+        {% if total < 0 %}{% set total = 0 %}{% endif %}
+        {% if total > 5 %}{% set total = 5 %}{% endif %}
+        {{ ((total*2)|round(0)/2) | float }}
+
+    # 9) Vergleichssoll: einfache Kurve ohne/mit Wetter
+    - name: "Vorlauf Basis (ohne Wetter)"
+      unique_id: vorlauf_basis_ohne_wetter
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      state: >-
+        {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {% set base  = 30 + (20 - t_out) * 0.8 %}
+        {{ base|round(1) }}
+
+    - name: "Vorlauf mit Wetter"
+      unique_id: vorlauf_mit_wetter
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      state: >-
+        {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {% set base  = 30 + (20 - t_out) * 0.8 %}
+        {% set min36 = states('sensor.forecast_min_temp_36h') %}
+        {% if min36 not in ['unknown','unavailable','none',''] %}
+          {% set corr = (10 - (min36|float)) * 0.3 %}
+          {{ (base + corr)|round(1) }}
+        {% else %}
+          {{ base|round(1) }}
+        {% endif %}
+
+    # 10) Vorlauf mit Wetter (GEKLEMMT, robust)
+    - name: "Vorlauf mit Wetter (geklemmt)"
+      unique_id: vorlauf_mit_wetter_gekl
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      state: >-
+        {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur') | float(10) %}
+        {% set base  = 30 + (20 - t_out) * 0.8 %}
+        {% set min36 = states('sensor.forecast_min_temp_36h') %}
+        {% set corr  = (10 - (min36|float(base))) * 0.3 if min36 not in ['unknown','unavailable','none',''] else 0 %}
+        {% set raw   = base + corr %}
+        {% set vmin  = states('number.thermostat_hc1_min_flow_temperature') | float(30) %}
+        {% set vmax  = states('number.thermostat_hc1_max_flow_temperature') | float(45) %}
+        {{ [ [ raw, vmin ] | max, vmax ] | min | round(1) }}
+      attributes:
+        t_out: "{{ states('sensor.gw2000a_wifid3a3_aussen_temperatur') }}"
+        base_calc: >-
+          {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+          {{ (30 + (20 - t_out) * 0.8) | round(2) }}
+        forecast_min_36h: "{{ states('sensor.forecast_min_temp_36h') }}"
+        corr_k: >-
+          {% set min36 = states('sensor.forecast_min_temp_36h') %}
+          {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+          {% set base  = 30 + (20 - t_out) * 0.8 %}
+          {{ ((10 - (min36|float(base))) * 0.3) | round(2) if min36 not in ['unknown','unavailable','none',''] else 0 }}
+        raw_unclamped: >-
+          {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+          {% set base  = 30 + (20 - t_out) * 0.8 %}
+          {% set min36 = states('sensor.forecast_min_temp_36h') %}
+          {% set corr  = (10 - (min36|float(base))) * 0.3 if min36 not in ['unknown','unavailable','none',''] else 0 %}
+          {{ (base + corr) | round(2) }}
+        clamp_min: "{{ states('number.thermostat_hc1_min_flow_temperature') | default(30) }}"
+        clamp_max: "{{ states('number.thermostat_hc1_max_flow_temperature') | default(45) }}"
+
+    # 11) Wetter-Delta (mit − ohne) – korrekt in Kelvin
+    - name: "Wetter-Delta (mit−ohne)"
+      unique_id: wetter_delta_mit_ohne
+      unit_of_measurement: "K"
+      state_class: measurement
+      state: >-
+        {% set mit  = states('sensor.vorlauf_mit_wetter_geklemmt') | float(none) %}
+        {% set ohne = states('sensor.vorlauf_basis_ohne_wetter')   | float(none) %}
+        {% if mit is not none and ohne is not none %}
+          {{ (mit - ohne) | round(2) }}
+        {% else %}
+          unknown
+        {% endif %}
+      attributes:
+        basis_ohne_wetter: "{{ states('sensor.vorlauf_basis_ohne_wetter') }}"
+        mit_wetter_geklemmt: "{{ states('sensor.vorlauf_mit_wetter_geklemmt') }}"
+
+    # 12) NEU – Prognose: Tmin der nächsten 6h
+    - name: "Forecast Tmin 6h"
+      unique_id: forecast_tmin_6h
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability: >-
+        {{ state_attr('sensor.hiltpoltstein_temperatur','data') is iterable
+           or states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(none) is not none }}
+      state: >-
+        {% set vals = [] %}
+        {% set dl = state_attr('sensor.hiltpoltstein_temperatur','data') %}
+        {% if dl is iterable and (dl|count) > 0 %}
+          {% for p in dl[:6] %}
+            {% if p is mapping and ('value' in p) %}
+              {% set vals = vals + [ p['value']|float ] %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {% set t_now = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {{ (vals|min)|round(1) if vals|count>0 else t_now }}
+
+    # 13) NEU – erwarteter Temperatursturz in 6h (K)
+    - name: "Forecast Drop 6h"
+      unique_id: forecast_drop_6h
+      unit_of_measurement: "K"
+      state_class: measurement
+      availability: >-
+        {{ states('sensor.forecast_tmin_6h')|float(none) is not none
+           and states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(none) is not none }}
+      state: >-
+        {% set t_now = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {% set t_min = states('sensor.forecast_tmin_6h')|float(t_now) %}
+        {% set drop = t_now - t_min %}
+        {{ (drop if drop>0 else 0) | round(1) }}
+
+    # 14) NEU – vorausschauender Offset (6h), 0..2 K, mit Sonne/Wind-Feintuning
+    - name: "Offset prognostiziert (6h)"
+      unique_id: offset_prognose_6h
+      unit_of_measurement: "K"
+      state_class: measurement
+      availability: >-
+        {{ states('sensor.forecast_drop_6h')|float(none) is not none }}
+      state: >-
+        {% set drop = states('sensor.forecast_drop_6h')|float(0) %}
+        {% set t_out = states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(10) %}
+        {% set sun   = states('sensor.gw2000a_wifid3a3_solarstrahlung')|float(0) %}
+        {% set wind  = states('sensor.gw2000a_wifid3a3_windgeschwindigkeit')|float(0) %}
+        {% if   drop >= 8 %}  {% set base = 1.8 %}
+        {% elif drop >= 6 %}  {% set base = 1.4 %}
+        {% elif drop >= 4 %}  {% set base = 1.0 %}
+        {% elif drop >= 2 %}  {% set base = 0.6 %}
+        {% else %}            {% set base = 0.0 %}
+        {% endif %}
+        {% set mod_sun  = (-0.2) if sun > 400 else 0 %}
+        {% set mod_wind = ( 0.2) if (wind > 20 and t_out < 3) else 0 %}
+        {% set total = base + mod_sun + mod_wind %}
+        {% if total < 0 %}{% set total = 0 %}{% endif %}
+        {% if total > 2.0 %}{% set total = 2.0 %}{% endif %}
+        {{ total | round(2) }}
+      attributes:
+        drop_6h_k: "{{ states('sensor.forecast_drop_6h') }}"
+        t_out: "{{ states('sensor.gw2000a_wifid3a3_aussen_temperatur') }}"
+        sun_wm2: "{{ states('sensor.gw2000a_wifid3a3_solarstrahlung') }}"
+        wind_ms: "{{ states('sensor.gw2000a_wifid3a3_windgeschwindigkeit') }}"
+
+- binary_sensor:
+
+    # 15) Erwärmung erwartet (true, wenn Prognose > Außen um 0.3 K)
+    - name: "HC1 Erwärmung erwartet"
+      unique_id: hc1_erwaermung_erwartet
+      device_class: heat
+      availability: >-
+        {{ states('sensor.hiltpoltstein_temperatur')|float(none) is not none
+           and states('sensor.gw2000a_wifid3a3_aussen_temperatur')|float(none) is not none }}
+      state: >-
+        {{ ((states('sensor.hiltpoltstein_temperatur') | float)
+           - (states('sensor.gw2000a_wifid3a3_aussen_temperatur') | float)) > 0.3 }}
+      attributes:
+        delta_k: >-
+          {{ ((states('sensor.hiltpoltstein_temperatur') | float)
+             - (states('sensor.gw2000a_wifid3a3_aussen_temperatur') | float))| round(2) }}

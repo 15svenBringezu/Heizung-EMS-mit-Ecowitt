@@ -1,0 +1,13 @@
+# sensor.yaml
+# ==========================================
+# Nur klassische Sensor-Plattformen.
+# KEINE Template-Sensoren hier!
+# ==========================================
+
+- platform: statistics
+  name: "Pumpen-Auslastung (24h)"
+  entity_id: sensor.boiler_circulation_pump_speed
+  state_characteristic: mean
+  max_age:
+    hours: 24
+  sampling_size: 500

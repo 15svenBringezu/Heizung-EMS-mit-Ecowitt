@@ -1,0 +1,60 @@
+# ==============================
+# configuration.yaml
+# ==============================
+
+default_config:
+
+homeassistant:
+  name: Home
+  country: DE
+  time_zone: Europe/Berlin
+  unit_system: metric
+  currency: EUR
+  packages: !include_dir_named packages  # Packages aktiv
+
+logger:
+  default: warning
+  logs:
+    homeassistant.components.template: warning
+    homeassistant.components.automation: warning
+
+recorder:
+  purge_keep_days: 14
+  auto_purge: true
+  exclude:
+    entity_globs:
+      - sensor.*_debug*
+      - sensor.*_test*
+      - sensor.*_alt*
+      - sensor.*_old*
+    domains:
+      - updater
+
+history:
+logbook:
+frontend:
+
+# Input Numbers
+input_number:
+  hc1_offset_gain:
+    name: HC1 Offset Gain
+    min: 0.5
+    max: 3.5
+    step: 0.1
+    mode: slider
+    icon: mdi:tune-variant
+  last_valid_flow_setpoint:
+    name: Letzter gültiger Vorlauf-Soll
+    min: 20
+    max: 70
+    step: 0.5
+    mode: box
+    icon: mdi:thermometer
+
+# Ausgelagerte Dateien
+template:      !include templates.yaml
+automation:    !include automations.yaml
+sensor:        !include sensor.yaml
+binary_sensor: !include binary_sensor.yaml
+script:        !include scripts.yaml
+scene:         !include scenes.yaml

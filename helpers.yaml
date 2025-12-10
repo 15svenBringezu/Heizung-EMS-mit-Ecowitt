@@ -1,0 +1,4 @@
+input_boolean:
+  winter_mode:
+    name: Wintermodus aktiv
+    icon: mdi:snowflake
